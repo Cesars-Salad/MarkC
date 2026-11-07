@@ -1,0 +1,3 @@
+# Optional image OCR support. Install only if you choose to use OCR.
+markitdown-ocr
+openai
