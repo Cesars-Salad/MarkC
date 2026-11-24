@@ -8,8 +8,6 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from tkinterdnd2 import DND_FILES, TkinterDnD
-
 from converter import (
     ConversionResult,
     MergeResult,
@@ -32,8 +30,12 @@ class BatchMarkdownApp:
         self.ocr_files: set[str] = set()
         self.messages: queue.Queue[tuple[str, object]] = queue.Queue()
         self.failures: list[ConversionResult] = []
+        self._successful_count = 0
         self.merged_result: MergeResult | None = None
         self.active_merge = False
+        self._busy = False
+        self._task_total = 0
+        self._close_when_done = False
 
         self.language = tk.StringVar(value=load_language())
         self.output_mode = tk.StringVar(value="separate")
@@ -43,6 +45,7 @@ class BatchMarkdownApp:
         self.status = tk.StringVar()
         self._build_ui()
         self._apply_language()
+        self.root.protocol("WM_DELETE_WINDOW", self._request_close)
         self.root.after(100, self._process_messages)
 
     def _t(self, key: str, **values: object) -> str:
@@ -144,9 +147,10 @@ class BatchMarkdownApp:
 
         self.destination_frame = ttk.LabelFrame(outer, padding=8)
         self.destination_frame.pack(fill="x", pady=(4, 8))
-        ttk.Entry(self.destination_frame, textvariable=self.output_dir).pack(
-            side="left", fill="x", expand=True
+        self.output_dir_entry = ttk.Entry(
+            self.destination_frame, textvariable=self.output_dir
         )
+        self.output_dir_entry.pack(side="left", fill="x", expand=True)
         self.browse_button = ttk.Button(
             self.destination_frame, command=self._choose_output
         )
@@ -231,6 +235,8 @@ class BatchMarkdownApp:
             )
 
     def _add_paths(self, paths: tuple[str, ...] | list[str]) -> None:
+        if self._busy:
+            return
         existing = {self._key(path) for path in self.files}
         for item in paths:
             path = Path(item.strip().strip('"'))
@@ -241,10 +247,14 @@ class BatchMarkdownApp:
         self._set_status()
 
     def _handle_drop(self, event: tk.Event) -> None:
+        if self._busy:
+            return "break"
         self._add_paths(self.root.tk.splitlist(event.data))
         return None
 
     def _add_files(self) -> None:
+        if self._busy:
+            return
         chosen = filedialog.askopenfilenames(
             title=self._t("choose_files"),
             filetypes=((self._t("name_column"), "*.*"),),
@@ -252,6 +262,8 @@ class BatchMarkdownApp:
         self._add_paths(chosen)
 
     def _toggle_ocr_cell(self, event: tk.Event) -> str | None:
+        if self._busy:
+            return "break"
         if self.file_list.identify_column(event.x) != "#3":
             return None
         row = self.file_list.identify_row(event.y)
@@ -278,6 +290,8 @@ class BatchMarkdownApp:
         return "break"
 
     def _toggle_ocr_all(self) -> None:
+        if self._busy:
+            return
         eligible = [path for path in self.files if path.suffix.casefold() in OCR_FORMATS]
         if self.ocr_var.get():
             self.ocr_files.update(self._key(path) for path in eligible)
@@ -291,6 +305,8 @@ class BatchMarkdownApp:
         self.ocr_var.set(bool(eligible) and eligible.issubset(self.ocr_files))
 
     def _move_selected(self, direction: int) -> None:
+        if self._busy:
+            return
         rows = list(self.file_list.get_children())
         indices = sorted(
             (rows.index(row) for row in self.file_list.selection()),
@@ -310,6 +326,8 @@ class BatchMarkdownApp:
             self.file_list.selection_set(selected_rows)
 
     def _remove_selected(self) -> None:
+        if self._busy:
+            return
         selected = set(self.file_list.selection())
         rows = list(self.file_list.get_children())
         self.files = [path for row, path in zip(rows, self.files) if row not in selected]
@@ -320,6 +338,8 @@ class BatchMarkdownApp:
         self._set_status()
 
     def _clear(self) -> None:
+        if self._busy:
+            return
         self.files.clear()
         self.ocr_files.clear()
         self.progress["value"] = 0
@@ -328,6 +348,8 @@ class BatchMarkdownApp:
         self._set_status()
 
     def _choose_output(self) -> None:
+        if self._busy:
+            return
         chosen = filedialog.askdirectory(
             title=self._t("choose_output"),
             initialdir=self.output_dir.get() or str(Path.home()),
@@ -343,6 +365,7 @@ class BatchMarkdownApp:
         self._update_ocr_all_state()
 
     def _set_busy(self, busy: bool) -> None:
+        self._busy = busy
         state = "disabled" if busy else "normal"
         for button in (
             self.add_button,
@@ -352,15 +375,34 @@ class BatchMarkdownApp:
             self.convert_button,
             self.move_up_button,
             self.move_down_button,
-            self.merged_name_entry,
             self.ocr_check,
             self.ocr_model_entry,
             self.language_picker,
             *self.mode_buttons,
         ):
             button.configure(state=state)
+        self.output_dir_entry.configure(state=state)
+        self.merged_name_entry.configure(
+            state="normal"
+            if not busy and self.output_mode.get() == "merged"
+            else "disabled"
+        )
+        self.file_list.state(["disabled"] if busy else ["!disabled"])
+
+    def _request_close(self) -> None:
+        if not self._busy:
+            self.root.destroy()
+            return
+        self._close_when_done = messagebox.askyesno(
+            self._t("conversion_running_title"),
+            self._t("conversion_running_close"),
+        )
+        if self._close_when_done:
+            self.status.set(self._t("closing_after_conversion"))
 
     def _start_conversion(self) -> None:
+        if self._busy:
+            return
         if not self.files:
             messagebox.showinfo(self._t("no_files_title"), self._t("no_files"))
             return
@@ -370,6 +412,7 @@ class BatchMarkdownApp:
             return
 
         files = list(self.files)
+        total = len(files)
         ocr_files = {
             path for path in files if self._key(path) in self.ocr_files
         }
@@ -425,12 +468,14 @@ class BatchMarkdownApp:
             return
 
         self.failures.clear()
+        self._successful_count = 0
         self.merged_result = None
         self.active_merge = merged
+        self._task_total = total
         output_dir = Path(destination).expanduser()
-        self.progress.configure(maximum=len(files), value=0)
+        self.progress.configure(maximum=total, value=0)
         self.status.set(
-            self._t("processing" if merged else "converting", done=0, total=len(files))
+            self._t("processing" if merged else "converting", done=0, total=total)
         )
         self._set_busy(True)
 
@@ -447,7 +492,7 @@ class BatchMarkdownApp:
                         ocr_model=model,
                     )
                     self.messages.put(("merged_result", result))
-                    self.messages.put(("progress", len(files)))
+                    self.messages.put(("progress", total))
                 else:
                     for result in iter_convert_files(
                         files,
@@ -460,9 +505,9 @@ class BatchMarkdownApp:
             except Exception as exc:
                 self.messages.put(("fatal", exc))
             finally:
-                self.messages.put(("done", len(files)))
+                self.messages.put(("done", total))
 
-        threading.Thread(target=worker, daemon=True).start()
+        threading.Thread(target=worker).start()
 
     def _process_messages(self) -> None:
         while True:
@@ -477,11 +522,12 @@ class BatchMarkdownApp:
                 completed = int(self.progress["value"]) + 1
                 self.progress["value"] = completed
                 if result.succeeded:
+                    self._successful_count += 1
                     self.status.set(
                         self._t(
                             "converted",
                             done=completed,
-                            total=len(self.files),
+                            total=self._task_total,
                             name=result.output.name if result.output else "",
                         )
                     )
@@ -491,7 +537,7 @@ class BatchMarkdownApp:
                         self._t(
                             "failed_progress",
                             done=completed,
-                            total=len(self.files),
+                            total=self._task_total,
                             name=result.source.name,
                         )
                     )
@@ -505,8 +551,14 @@ class BatchMarkdownApp:
             elif kind == "done":
                 self._set_busy(False)
                 if self.active_merge and self.merged_result is None:
+                    if self._close_when_done:
+                        self.root.destroy()
+                        return
                     continue
                 self._show_summary()
+                if self._close_when_done:
+                    self.root.destroy()
+                    return
 
         self.root.after(100, self._process_messages)
 
@@ -538,8 +590,8 @@ class BatchMarkdownApp:
                 )
             return
 
-        succeeded = int(self.progress["value"])
-        failed = len(self.files) - succeeded
+        succeeded = self._successful_count
+        failed = self._task_total - succeeded
         if failed:
             self.status.set(
                 self._t("done_with_failures", ok=succeeded, bad=failed)
@@ -562,6 +614,8 @@ class BatchMarkdownApp:
 
 
 def main() -> None:
+    from tkinterdnd2 import DND_FILES, TkinterDnD
+
     root = TkinterDnD.Tk()
     BatchMarkdownApp(root)
     root.mainloop()

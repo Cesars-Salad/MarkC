@@ -9,9 +9,9 @@ Um aplicativo de desktop simples para converter arquivos compatíveis com o [Mic
 - Windows 10 or later / Windows 10 ou superior
 - Python 3.10+ with Tcl/Tk (included in the official Windows installer) / Python 3.10+ com Tcl/Tk (incluído no instalador oficial do Windows)
 
-The MarkItDown `all` extra enables its common optional converters. Supported formats depend on MarkItDown and its plugins.
+The MarkItDown `all` extra enables its common optional converters and is retained to avoid removing supported input formats. Supported formats depend on MarkItDown and its plugins.
 
-O extra `all` do MarkItDown habilita conversores opcionais comuns. Os formatos aceitos dependem do MarkItDown e de seus plugins.
+O extra `all` do MarkItDown habilita conversores opcionais comuns e é mantido para evitar a remoção de formatos de entrada compatíveis. Os formatos aceitos dependem do MarkItDown e de seus plugins.
 
 ## Installation / Instalação
 
@@ -56,6 +56,8 @@ Não cole chaves de API na interface nem as inclua no repositório. Antes de ini
 2. Click the OCR column for each supported PDF, DOCX, PPTX, or XLSX file that should use OCR. The OCR option does not change standard conversions for other rows. / Clique na coluna OCR para cada PDF, DOCX, PPTX ou XLSX que deve usar OCR. Os demais arquivos continuam usando a conversão normal.
 3. Choose one Markdown output per input or a single combined file. The combined document follows the displayed order; use ↑ and ↓ to reorder rows. Markdown inputs are read directly, while other inputs are converted by MarkItDown. / Escolha um Markdown por entrada ou um único arquivo combinado. A ordem da lista determina a ordem do resultado; use ↑ e ↓ para reorganizar. Arquivos Markdown são lidos diretamente; os demais passam pelo MarkItDown.
 4. Choose the output folder and run the conversion. Existing files are never overwritten; a numeric suffix is added when needed. Individual failures do not stop the rest of the batch. / Escolha a pasta de destino e inicie. Arquivos existentes nunca são substituídos; um sufixo numérico é acrescentado se necessário. Uma falha individual não interrompe o lote.
+
+While a conversion is running, the file list and destination are locked. If you close the window, you can choose to close the app after the current batch finishes; the conversion continues safely. / Durante a conversão, a lista e a pasta de destino ficam bloqueadas. Ao fechar a janela, você pode optar por fechar o aplicativo após o lote terminar; a conversão continua com segurança.
 
 Use the language selector to switch between English and Portuguese. This preference is saved locally. / Use o seletor de idioma para alternar entre português e inglês. A preferência fica salva localmente.
 
